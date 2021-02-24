@@ -304,7 +304,7 @@ contract UnidoDistribution is Ownable {
      * Only do max 100 at a time, call repeatedly which it returns true
      */
     function updateRelease() external onlyOwner returns (bool) {
-        uint scan = 100;
+        uint scan = 150;
         uint len = participants.length;
         for (uint i = continuePoint; i < len && i < continuePoint.add(scan); i++) {
             address p = participants[i];
@@ -327,16 +327,20 @@ contract UnidoDistribution is Ownable {
                 deletions.push(i);
             }
         }
-        
-        if (continuePoint.add(scan) >= participants.length) {
+        continuePoint = continuePoint.add(scan);
+        if (continuePoint >= participants.length) {
             continuePoint = 0;
-            while (deletions.length > 0) {
-                uint index = deletions[deletions.length-1];
-                deletions.pop();
-                
-                participants[index] = participants[participants.length - 1];
-                participants.pop();
+            uint deleteLen = deletions.length;
+            uint partLen = participants.length;
+            if (deleteLen == partLen) {
+                delete participants;
+            } else {
+                for (uint i = 0; i < deleteLen; i++) {
+                    participants[deleteLen - i - 1] = participants[partLen - i - 1];
+                    delete participants[partLen - 1];
+                }
             }
+            delete deletions;
             return false;
         }
         
