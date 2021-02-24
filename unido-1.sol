@@ -135,6 +135,7 @@ contract UnidoDistribution is Ownable {
     address[] public participants;
     
     bool private isActive;
+    uint256 private scanLength = 150;
     uint256 private continuePoint;
     uint256[] private deletions;
     
@@ -173,6 +174,10 @@ contract UnidoDistribution is Ownable {
         require (!isActive, "Can only set tradeable when its not already tradeable");
         isActive = true;
         Active(true);
+    }
+    
+    function setScanLength(uint256 len) external onlyOwner {
+        scanLength = len;
     }
     
     function balanceOf(address tokenOwner) public view returns (uint) {
@@ -304,9 +309,10 @@ contract UnidoDistribution is Ownable {
      * Only do max 100 at a time, call repeatedly which it returns true
      */
     function updateRelease() external onlyOwner returns (bool) {
-        uint scan = 150;
+        uint scan = scanLength;
         uint len = participants.length;
-        for (uint i = continuePoint; i < len && i < continuePoint.add(scan); i++) {
+        uint continueAddScan = continuePoint.add(scan);
+        for (uint i = continuePoint; i < len && i < continueAddScan; i++) {
             address p = participants[i];
             if (lockoutPeriods[p] > 0) {
                 lockoutPeriods[p]--;
