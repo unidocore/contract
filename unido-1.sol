@@ -1,22 +1,19 @@
+// SPDX-License-Identifier: MIT
 pragma solidity 0.7.0;
 
 contract Ownable {
-    address private _owner;
+    address public owner;
     address private _nextOwner;
     
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     
     constructor() {
-        _owner = msg.sender;
-        emit OwnershipTransferred(address(0), _owner);
-    }
-    
-    function owner() public view returns (address) {
-        return _owner;
+        owner = msg.sender;
+        emit OwnershipTransferred(address(0), owner);
     }
     
     modifier onlyOwner() {
-        require(msg.sender == _owner, 'Only the owner of the contract can do that');
+        require(msg.sender == owner, 'Only the owner of the contract can do that');
         _;
     }
     
@@ -26,8 +23,8 @@ contract Ownable {
     
     function takeOwnership() public {
         require(msg.sender == _nextOwner, 'Must be given ownership to do that');
-        emit OwnershipTransferred(_owner, _nextOwner);
-        _owner = _nextOwner;
+        emit OwnershipTransferred(owner, _nextOwner);
+        owner = _nextOwner;
     }
 }
 
@@ -100,7 +97,7 @@ library SafeMath {
      */
     function div(uint256 a, uint256 b) internal pure returns (uint256) {
         // Solidity only automatically asserts when dividing by 0
-        require(b > 0, "SafeMath: division by zero");
+        require(b != 0, "SafeMath: division by zero");
         uint256 c = a / b;
         // assert(a == b * c + a % b); // There is no case in which this doesn't hold
 
@@ -127,50 +124,55 @@ library SafeMath {
 contract UnidoDistribution is Ownable {
     using SafeMath for uint256;
     
-    uint SEED_POOL = 1;
-    uint PRIVATE_POOL = 2;
-    uint TEAM_POOL = 3;
-    uint ADVISOR_POOL = 4;
-    uint ECOSYSTEM_POOL = 5;
-    uint MINING_POOL = 6;
-    uint RESERVE_POOL = 7;
+    enum POOL{SEED, PRIVATE, TEAM, ADVISOR, ECOSYSTEM, LIQUIDITY, RESERVE}
     
-    mapping (uint => uint) public pools;
+    mapping (POOL => uint) public pools;
     
-    uint256 public totalSupply_;
-    string public name = "Unido";
-    uint256 public decimals = 18;
-    string public symbol = "UDO";
+    uint256 public totalSupply;
+    string public constant name = "Unido";
+    uint256 public constant decimals = 18;
+    string public constant symbol = "UDO";
     address[] public participants;
     
-    uint256 private continuePoint = 0;
+    bool private isActive;
+    uint256 private continuePoint;
     uint256[] private deletions;
     
-    mapping (address => uint256) public balances;
-    mapping (address => mapping(address => uint256)) public allowances;
+    mapping (address => uint256) private balances;
+    mapping (address => mapping(address => uint256)) private allowances;
     mapping (address => uint256) public lockoutPeriods;
     mapping (address => uint256) public lockoutBalances;
     mapping (address => uint256) public lockoutReleaseRates;
     
+    event Active(bool isActive);
     event Approval(address indexed tokenOwner, address indexed spender, uint tokens);
     event Transfer(address indexed from, address indexed to, uint tokens);
     event Burn(address indexed tokenOwner, uint tokens);
     
     constructor () {
-        pools[SEED_POOL] = 15000000 * 10**decimals;
-        pools[PRIVATE_POOL] = 16000000 * 10**decimals;
-        pools[TEAM_POOL] = 18400000 * 10**decimals;
-        pools[ADVISOR_POOL] = 10350000 * 10**decimals;
-        pools[ECOSYSTEM_POOL] = 14375000 * 10**decimals;
-        pools[MINING_POOL] = 8625000 * 10**decimals;
-        pools[RESERVE_POOL] = 32250000 * 10**decimals;
+        pools[POOL.SEED] = 15000000 * 10**decimals;
+        pools[POOL.PRIVATE] = 16000000 * 10**decimals;
+        pools[POOL.TEAM] = 18400000 * 10**decimals;
+        pools[POOL.ADVISOR] = 10350000 * 10**decimals;
+        pools[POOL.ECOSYSTEM] = 14375000 * 10**decimals;
+        pools[POOL.LIQUIDITY] = 8625000 * 10**decimals;
+        pools[POOL.RESERVE] = 32250000 * 10**decimals;
 
-        totalSupply_ = pools[SEED_POOL] + pools[PRIVATE_POOL] + pools[TEAM_POOL] + pools[ADVISOR_POOL]
-                    + pools[ECOSYSTEM_POOL] + pools[MINING_POOL] + pools[RESERVE_POOL];
+        totalSupply = pools[POOL.SEED] + pools[POOL.PRIVATE] + pools[POOL.TEAM] + pools[POOL.ADVISOR] + pools[POOL.ECOSYSTEM] + pools[POOL.LIQUIDITY] + pools[POOL.RESERVE];
     }
     
-    function totalSupply() public view returns (uint256) {
-        return totalSupply_;
+    function _isTradeable() internal view returns (bool) {
+        return isActive || (block.number > 11917750);
+    }
+    
+    function isTradeable() public view returns (bool) {
+        return _isTradeable();
+    }
+    
+    function setTradeable() external onlyOwner {
+        require (!isActive, "Can only set tradeable when its not already tradeable");
+        isActive = true;
+        Active(true);
     }
     
     function balanceOf(address tokenOwner) public view returns (uint) {
@@ -185,18 +187,39 @@ contract UnidoDistribution is Ownable {
         return balances[tokenOwner].sub(lockoutBalances[tokenOwner]);
     }
     
-    function transfer(address to, uint tokens) public {
+    function transfer(address to, uint tokens) public returns (bool) {
+        require (_isTradeable(), "Contract is not tradeable yet");
         require (balances[msg.sender].sub(lockoutBalances[msg.sender]) >= tokens, "Must have enough spendable tokens");
         require (tokens > 0, "Must transfer non-zero amount");
+        require (to != address(0), "Cannot send to the 0 address");
         
         balances[msg.sender] = balances[msg.sender].sub(tokens);
         balances[to] = balances[to].add(tokens);
         Transfer(msg.sender, to, tokens);
+        return true;
     }
     
-    function approve(address spender, uint tokens) public {
-        allowances[msg.sender][spender] = tokens;
-        Approval(msg.sender, spender, tokens);
+    function increaseAllowance(address spender, uint addedValue) public returns (bool) {
+        _approve(msg.sender, spender, allowances[msg.sender][spender].add(addedValue));
+        return true;
+    }
+    
+    function decreaseAllowance(address spender, uint subtractedValue) public returns (bool) {
+        _approve(msg.sender, spender, allowances[msg.sender][spender].sub(subtractedValue));
+        return true;
+    }
+    
+    function approve(address spender, uint tokens) public returns (bool) {
+        _approve(msg.sender, spender, tokens);
+        return true;
+    }
+    
+    function _approve(address owner, address spender, uint tokens) internal {
+        require (owner != address(0), "Cannot approve from the 0 address");
+        require (spender != address(0), "Cannot approve the 0 address");
+        
+        allowances[owner][spender] = tokens;
+        Approval(owner, spender, tokens);
     }
     
     function burn(uint tokens) public {
@@ -204,65 +227,74 @@ contract UnidoDistribution is Ownable {
         require (tokens > 0, "Must burn non-zero amount");
         
         balances[msg.sender] = balances[msg.sender].sub(tokens);
-        totalSupply_ = totalSupply_.sub(tokens);
+        totalSupply = totalSupply.sub(tokens);
         Burn(msg.sender, tokens);
     }
     
-    function transferFrom(address from, address to, uint tokens) public {
+    function transferFrom(address from, address to, uint tokens) public returns (bool) {
+        require (_isTradeable(), "Contract is not trading yet");
         require (balances[msg.sender].sub(lockoutBalances[msg.sender]) >= tokens, "Must have enough spendable tokens");
         require (allowances[from][msg.sender] >= tokens, "Must be approved to spend that much");
         require (tokens > 0, "Must transfer non-zero amount");
+        require (from != address(0), "Cannot send from the 0 address");
+        require (to != address(0), "Cannot send to the 0 address");
         
         balances[from] = balances[from].sub(tokens);
         balances[to] = balances[to].add(tokens);
         allowances[from][msg.sender] = allowances[from][msg.sender].sub(tokens);
         Transfer(msg.sender, to, tokens);
+        return true;
     }
     
-    function addParticipants(uint pool, address[] calldata _participants, uint256[] calldata _stakes) external onlyOwner {
-        require (pool >= SEED_POOL && pool <= RESERVE_POOL, "Must select a valid pool");
+    function addParticipants(POOL pool, address[] calldata _participants, uint256[] calldata _stakes) external onlyOwner {
+        require (pool >= POOL.SEED && pool <= POOL.RESERVE, "Must select a valid pool");
         require (_participants.length == _stakes.length, "Must have equal array sizes");
         
         uint lockoutPeriod;
         uint lockoutReleaseRate;
         
-        if (pool == SEED_POOL) {
-            lockoutPeriod = 6;
+        if (pool == POOL.SEED) {
+            lockoutPeriod = 1;
             lockoutReleaseRate = 6;
-        } else if (pool == PRIVATE_POOL) {
-            lockoutPeriod = 4;
-            lockoutReleaseRate = 6;
-        } else if (pool == TEAM_POOL) {
+        } else if (pool == POOL.PRIVATE) {
+            lockoutReleaseRate = 4;
+        } else if (pool == POOL.TEAM) {
             lockoutPeriod = 12;
             lockoutReleaseRate = 12;
-        } else if (pool == ADVISOR_POOL) {
+        } else if (pool == POOL.ADVISOR) {
             lockoutPeriod = 6;
             lockoutReleaseRate = 6;
-        } else if (pool == ECOSYSTEM_POOL) {
+        } else if (pool == POOL.ECOSYSTEM) {
             lockoutPeriod = 3;
-            lockoutReleaseRate = 12;
-        } else if (pool == MINING_POOL) {
-            lockoutPeriod = 0;
-            lockoutReleaseRate = 6;
-        } else if (pool == RESERVE_POOL) {
-            lockoutPeriod = 0;
+            lockoutReleaseRate = 9;
+        } else if (pool == POOL.LIQUIDITY) {
+            lockoutReleaseRate = 1;
+        } else if (pool == POOL.RESERVE) {
             lockoutReleaseRate = 18;
         }
         
-        for (uint256 i = 0; i < _participants.length; i++) {
-            require(lockoutBalances[_participants[i]] == 0, "Participants can't be involved in multiple lock ups simultaneously");
+        uint256 sum;
+        uint256 len = _participants.length;
+        for (uint256 i = 0; i < len; i++) {
+            address p = _participants[i];
+            require(lockoutBalances[p] == 0, "Participants can't be involved in multiple lock ups simultaneously");
         
-            participants.push(_participants[i]);
-            lockoutBalances[_participants[i]] = _stakes[i];
-            lockoutPeriods[_participants[i]] = lockoutPeriod;
-            lockoutReleaseRates[_participants[i]] = lockoutReleaseRate;
+            participants.push(p);
+            lockoutBalances[p] = _stakes[i];
+            balances[p] = balances[p].add(_stakes[i]);
+            lockoutPeriods[p] = lockoutPeriod;
+            lockoutReleaseRates[p] = lockoutReleaseRate;
+            sum = sum.add(_stakes[i]);
         }
+        
+        require(sum <= pools[pool], "Insufficient amount left in pool for this");
+        pools[pool] = pools[pool].sub(sum);
     }
     
-    function finalizeParticipants(uint pool) external onlyOwner {
+    function finalizeParticipants(POOL pool) external onlyOwner {
         uint leftover = pools[pool];
         pools[pool] = 0;
-        totalSupply_ = totalSupply_.sub(leftover);
+        totalSupply = totalSupply.sub(leftover);
     }
     
     /**
@@ -271,15 +303,24 @@ contract UnidoDistribution is Ownable {
      * If the lockout release rate is 0, assume its all released at the date
      * Only do max 100 at a time, call repeatedly which it returns true
      */
-    function updateRelease() external onlyOwner returns (bool continues) {
+    function updateRelease() external onlyOwner returns (bool) {
         uint scan = 100;
-        
-        for (uint i = continuePoint; i < participants.length && i < continuePoint.add(scan); i++) {
+        uint len = participants.length;
+        for (uint i = continuePoint; i < len && i < continuePoint.add(scan); i++) {
             address p = participants[i];
             if (lockoutPeriods[p] > 0) {
                 lockoutPeriods[p]--;
             } else if (lockoutReleaseRates[p] > 0) {
-                uint release = lockoutBalances[p].div(lockoutReleaseRates[p]);
+                uint rate = lockoutReleaseRates[p];
+                
+                uint release;
+                if (rate == 18) {
+                    // First release of reserve is 12.5%
+                    release = lockoutBalances[p].div(8);
+                } else {
+                    release = lockoutBalances[p].div(lockoutReleaseRates[p]);
+                }
+                
                 lockoutBalances[p] = lockoutBalances[p].sub(release);
                 lockoutReleaseRates[p]--;
             } else {
