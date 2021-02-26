@@ -124,6 +124,13 @@ library SafeMath {
 contract UnidoDistribution is Ownable {
     using SafeMath for uint256;
     
+    // 0 - SEED
+    // 1 - PRIVATE
+    // 2 - TEAM
+    // 3 - ADVISOR
+    // 4 - ECOSYSTEM
+    // 5 - LIQUIDITY
+    // 6 - RESERVE
     enum POOL{SEED, PRIVATE, TEAM, ADVISOR, ECOSYSTEM, LIQUIDITY, RESERVE}
     
     mapping (POOL => uint) public pools;
@@ -135,6 +142,7 @@ contract UnidoDistribution is Ownable {
     address[] public participants;
     
     bool private isActive;
+    uint256 private scanLength = 150;
     uint256 private continuePoint;
     uint256[] private deletions;
     
@@ -157,12 +165,22 @@ contract UnidoDistribution is Ownable {
         pools[POOL.ECOSYSTEM] = 14375000 * 10**decimals;
         pools[POOL.LIQUIDITY] = 8625000 * 10**decimals;
         pools[POOL.RESERVE] = 32250000 * 10**decimals;
-
+        
         totalSupply = pools[POOL.SEED] + pools[POOL.PRIVATE] + pools[POOL.TEAM] + pools[POOL.ADVISOR] + pools[POOL.ECOSYSTEM] + pools[POOL.LIQUIDITY] + pools[POOL.RESERVE];
+
+        // Give POLS private sale directly
+        uint pols = 2000000 * 10**decimals;
+        pools[POOL.PRIVATE] = pools[POOL.PRIVATE].sub(pols);
+        balances[address(0xeFF02cB28A05EebF76cB6aF993984731df8479b1)] = pols;
+        
+        // Give LIQUIDITY pool their half directly
+        uint liquid = pools[POOL.LIQUIDITY].div(2);
+        pools[POOL.LIQUIDITY] = pools[POOL.LIQUIDITY].sub(liquid);
+        balances[address(0xd6221a4f8880e9Aa355079F039a6012555556974)] = liquid;
     }
     
     function _isTradeable() internal view returns (bool) {
-        return isActive || (block.number > 11917750);
+        return isActive;
     }
     
     function isTradeable() public view returns (bool) {
@@ -173,6 +191,10 @@ contract UnidoDistribution is Ownable {
         require (!isActive, "Can only set tradeable when its not already tradeable");
         isActive = true;
         Active(true);
+    }
+    
+    function setScanLength(uint256 len) external onlyOwner {
+        scanLength = len;
     }
     
     function balanceOf(address tokenOwner) public view returns (uint) {
@@ -233,7 +255,7 @@ contract UnidoDistribution is Ownable {
     
     function transferFrom(address from, address to, uint tokens) public returns (bool) {
         require (_isTradeable(), "Contract is not trading yet");
-        require (balances[msg.sender].sub(lockoutBalances[msg.sender]) >= tokens, "Must have enough spendable tokens");
+        require (balances[from].sub(lockoutBalances[from]) >= tokens, "Must have enough spendable tokens");
         require (allowances[from][msg.sender] >= tokens, "Must be approved to spend that much");
         require (tokens > 0, "Must transfer non-zero amount");
         require (from != address(0), "Cannot send from the 0 address");
@@ -242,7 +264,7 @@ contract UnidoDistribution is Ownable {
         balances[from] = balances[from].sub(tokens);
         balances[to] = balances[to].add(tokens);
         allowances[from][msg.sender] = allowances[from][msg.sender].sub(tokens);
-        Transfer(msg.sender, to, tokens);
+        Transfer(from, to, tokens);
         return true;
     }
     
@@ -255,7 +277,7 @@ contract UnidoDistribution is Ownable {
         
         if (pool == POOL.SEED) {
             lockoutPeriod = 1;
-            lockoutReleaseRate = 6;
+            lockoutReleaseRate = 5;
         } else if (pool == POOL.PRIVATE) {
             lockoutReleaseRate = 4;
         } else if (pool == POOL.TEAM) {
@@ -269,6 +291,7 @@ contract UnidoDistribution is Ownable {
             lockoutReleaseRate = 9;
         } else if (pool == POOL.LIQUIDITY) {
             lockoutReleaseRate = 1;
+            lockoutPeriod = 1;
         } else if (pool == POOL.RESERVE) {
             lockoutReleaseRate = 18;
         }
@@ -304,9 +327,10 @@ contract UnidoDistribution is Ownable {
      * Only do max 100 at a time, call repeatedly which it returns true
      */
     function updateRelease() external onlyOwner returns (bool) {
-        uint scan = 100;
+        uint scan = scanLength;
         uint len = participants.length;
-        for (uint i = continuePoint; i < len && i < continuePoint.add(scan); i++) {
+        uint continueAddScan = continuePoint.add(scan);
+        for (uint i = continuePoint; i < len && i < continueAddScan; i++) {
             address p = participants[i];
             if (lockoutPeriods[p] > 0) {
                 lockoutPeriods[p]--;
@@ -327,13 +351,13 @@ contract UnidoDistribution is Ownable {
                 deletions.push(i);
             }
         }
-        
-        if (continuePoint.add(scan) >= participants.length) {
+        continuePoint = continuePoint.add(scan);
+        if (continuePoint >= len) {
             continuePoint = 0;
             while (deletions.length > 0) {
                 uint index = deletions[deletions.length-1];
                 deletions.pop();
-                
+
                 participants[index] = participants[participants.length - 1];
                 participants.pop();
             }
