@@ -194,6 +194,8 @@ contract UnidoDistribution is Ownable {
     }
     
     function setScanLength(uint256 len) external onlyOwner {
+        require (len > 20, "Values less than 20 are impractical");
+        require (len <= 200, "Values greater than 200 may cause the updateRelease function to fail");
         scanLength = len;
     }
     
